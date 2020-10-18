@@ -1,24 +1,18 @@
 import re
+import os
 import ssl
 import socket
-import validators
 from multiprocessing import Pool
 
 
-DATA = []
-
-
 def prepare_data(obj):
-    if 'http://' in obj:
-        return None
     obj = re.split('https://|/|\n', obj)
     return obj[0] if obj[0] else obj[1]
 
 
 def get_hosts():
     with open('input.txt', 'r') as file:
-        DATA.extend(list(map(prepare_data, file.readlines())))
-        return DATA
+        return list(map(prepare_data, file.readlines()))
 
 
 def write_data(data):
@@ -28,8 +22,17 @@ def write_data(data):
                 file.write(f'{obj}\n')
 
 
+def is_valid_hostname(hostname):
+    if len(hostname) > 255:
+        return False
+    if hostname[-1] == '.':
+        hostname = hostname[:-1]
+    allowed = re.compile('(?!-)[A-Z\d-]{1,63}(?<!-)$', re.IGNORECASE)
+    return all(allowed.match(x) for x in hostname.split('.'))
+
+
 def check_ssl(obj):
-    if validators.domain(obj):
+    if is_valid_hostname(obj):
         try:
             context = ssl.create_default_context()
             conn = context.wrap_socket(
@@ -40,12 +43,13 @@ def check_ssl(obj):
             conn.connect((obj, 443))
             cert = conn.getpeercert()
             return f"{obj}_{cert['notAfter'].replace(' ', '_')}"
-        except Exception as e:
-            raise e
+        except ssl.SSLError:
+            return
 
 
 if __name__ == '__main__':
-    get_hosts()
-    with Pool(32) as p:
-        result = list(p.map(check_ssl, DATA))
-        write_data(result)
+    result = []
+    data = get_hosts()
+    with Pool(os.cpu_count()) as p:
+        result.extend(p.map(check_ssl, data))
+    write_data(result)
